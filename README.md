@@ -2,7 +2,7 @@
 
 ## Setup
 
-(Link to docs)[https://docs.python.org/3/library/venv.html]
+[Link to venv docs](https://docs.python.org/3/library/venv.html)
 
 ### Create environment:
 
