@@ -1,5 +1,13 @@
 # Document Semantic Search
 
+## Run
+
+Run the app in reload mode with this command. This will let the app reload automatically when changes are made to the python script.
+
+```shell
+$ gradio main.py
+```
+
 ## Setup
 
 [Link to venv docs](https://docs.python.org/3/library/venv.html)
