@@ -1,53 +1,56 @@
-import os
-import sys
-
-from langchain.chains import RetrievalQA
-from langchain.document_loaders import DirectoryLoader, TextLoader
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.indexes import VectorstoreIndexCreator
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.document_loaders import PyMuPDFLoader
+from langchain.text_splitter import SentenceTransformersTokenTextSplitter
+from langchain.embeddings import SentenceTransformerEmbeddings
+from langchain.retrievers import BM25Retriever
+from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain.vectorstores import FAISS
 import gradio as gr
+import re
 
-# Enable to cache & reuse the model to disk (for repeated queries on the same data)
-PERSIST = False
+model = "msmarco-distilbert-base-v4"
+embeddings = SentenceTransformerEmbeddings(model_name=model)
+prev_files = None
+retriever = None
 
-query = sys.argv[1]
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+def handle_files_and_query(query, files):
+    results = ""
+    global prev_files, retriever
+    if files is not None and files != prev_files:
+        documents = []
+        prev_files = files
+        for file in files:
+            documents.extend(PyMuPDFLoader(file).load_and_split(SentenceTransformersTokenTextSplitter(model_name=model)))
+        retriever = BM25Retriever.from_documents(documents, k=10)
+        results += "Index created successfully!\n"
+        print("Index created successfully!")
+    elif files is None:
+        print("No files uploaded.")
+    else:
+        print("Reusing index since no files changed.")
 
-if PERSIST and os.path.exists("persist"):
-  print("Reusing index...\n")
-  raw_documents = DirectoryLoader("persist").load()
-  text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
-  documents = text_splitter.split_documents(raw_documents)
-  vectorstore = FAISS.from_documents(documents, embedding=embeddings)
-  from langchain.indexes.vectorstore import VectorStoreIndexWrapper
-  index = VectorStoreIndexWrapper(vectorstore=vectorstore)
-else:
-  loader = TextLoader('data.txt')
-  # This code can also import folders, including various filetypes like PDFs using the DirectoryLoader.
-  # loader = DirectoryLoader(".", glob="*.txt")
-  if PERSIST:
-    index = VectorstoreIndexCreator(vectorstore_kwargs={"persist_directory":"persist"}).from_loaders([loader])
-  else:
-    index = VectorstoreIndexCreator().from_loaders([loader])
-
-chain = RetrievalQA.from_chain_type(
-  llm=,
-  retriever=index.vectorstore.as_retriever(search_kwargs={"k": 5}),
-)
-print(chain.run(query))
+    print(f"Query: {query}")
+    if query:
+        search_results = retriever.get_relevant_documents(query, k=25)
+        pattern = r'[^\\/]+$' # pattern to get filename from filepath
+        reranked_results = FAISS.from_documents(search_results, embeddings, distance_strategy=DistanceStrategy.COSINE).similarity_search(query, k=1)
+        print([
+            f"Source: {re.search(pattern, result.metadata['file_path']).group(0)}\nPage: {result.metadata['page']}"
+            for result in reranked_results
+        ][0])
+        results = [
+            f"Source: {re.search(pattern, result.metadata['file_path']).group(0)}\nPage: {result.metadata['page']}\nContent:\n{result.page_content}"
+            for result in reranked_results
+        ][0]
+    return results
 
 interface = gr.Interface(
-    fn=predict,
+    fn=handle_files_and_query,
     inputs=[
-        gr.components.Textbox(lines = 1, label="Enter your search query here..."),
-        gr.components.File(file_count="single", type="file", label="Upload a file here.")
+        gr.Textbox(lines = 1, label="Enter your search query here..."),
+        gr.File(file_count="multiple", type="filepath", file_types=[".pdf"], label="Upload a file here.")
     ],
     outputs="text",
-    title="Search",
-    interpretation=None,
-    theme="default" # “default", “huggingface", “dark-grass", “peach"
+    title="Similarity Search for PDFs"
 )
 
 interface.launch()
