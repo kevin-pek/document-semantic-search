@@ -7,7 +7,7 @@ from langchain.vectorstores import FAISS
 import gradio as gr
 import re
 
-model = "msmarco-distilbert-base-v4"
+model = "msmarco-distilbert-base-tas-b"
 embeddings = SentenceTransformerEmbeddings(model_name=model)
 prev_files = None
 retriever = None
@@ -20,7 +20,7 @@ def handle_files_and_query(query, files):
         prev_files = files
         for file in files:
             documents.extend(PyMuPDFLoader(file).load_and_split(SentenceTransformersTokenTextSplitter(model_name=model)))
-        retriever = BM25Retriever.from_documents(documents, k=10)
+        retriever = BM25Retriever.from_documents(documents, k=100)
         results += "Index created successfully!\n"
         print("Index created successfully!")
     elif files is None:
@@ -30,17 +30,13 @@ def handle_files_and_query(query, files):
 
     print(f"Query: {query}")
     if query:
-        search_results = retriever.get_relevant_documents(query, k=25)
+        search_results = retriever.get_relevant_documents(query)
         pattern = r'[^\\/]+$' # pattern to get filename from filepath
-        reranked_results = FAISS.from_documents(search_results, embeddings, distance_strategy=DistanceStrategy.COSINE).similarity_search(query, k=1)
-        print([
-            f"Source: {re.search(pattern, result.metadata['file_path']).group(0)}\nPage: {result.metadata['page']}"
+        reranked_results = FAISS.from_documents(search_results, embeddings, distance_strategy=DistanceStrategy.COSINE).similarity_search(query, k=25)
+        results = "\n".join([
+            f"Source: {re.search(pattern, result.metadata['file_path']).group(0)}\nPage: {result.metadata['page']}\nContent:\n{result.page_content}\n"
             for result in reranked_results
-        ][0])
-        results = [
-            f"Source: {re.search(pattern, result.metadata['file_path']).group(0)}\nPage: {result.metadata['page']}\nContent:\n{result.page_content}"
-            for result in reranked_results
-        ][0]
+        ])
     return results
 
 interface = gr.Interface(
